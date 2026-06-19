@@ -62,7 +62,7 @@ Verwaltet **Direktnachrichten (DMs)** zwischen eingeloggten Nutzern sowie **Chan
 
 ## Channels (Bearer JWT, **Mitglieds-only**)
 
-> Zugriff nur für Channel-Mitglieder (`sub` ∈ `memberIds`). Nicht-Mitglieder → `403`, unbekannte Channels → `404`.
+> Zugriff nur für Channel-Mitglieder (`sub` ∈ `memberIds`). Ungültige `channelId` → `400`, Nicht-Mitglieder → `403`, unbekannte Channels → `404`.
 
 | Method | Endpoint | Body / Query | Description |
 |--------|----------|--------------|-------------|
