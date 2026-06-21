@@ -71,6 +71,24 @@ Verwaltet **Direktnachrichten (DMs)** zwischen eingeloggten Nutzern sowie **Chan
 
 ---
 
+## Channel-Mitgliedschaft verwalten (Bearer JWT)
+
+> **Berechtigung:** *ChannelAdmin* (`sub` ∈ `data.adminIds` **oder** `sub == createdBy`) **oder** *Service-Admin* (JWT-Rolle `admin`). Service-Admins dürfen verwalten, ohne Mitglied zu sein — erhalten dadurch aber **kein** Leserecht auf Nachrichten. Self-Leave (sich selbst entfernen) ist für jedes Mitglied erlaubt.
+>
+> Admins müssen **nicht** Mitglied sein (ein Nicht-Mitglied kann ChannelAdmin sein, kann dann aber nicht mitlesen). Der Ersteller (`createdBy`) ist permanenter Admin und kann **nicht** entfernt oder degradiert werden (`409`).
+
+| Method | Endpoint | Body | Auth | Description |
+|--------|----------|------|------|-------------|
+| `GET` | `/channels/:channelId/members` | — | Mitglied / ChannelAdmin / Service-Admin | `{ memberIds, adminIds }` |
+| `POST` | `/channels/:channelId/members` | `{ userId* }` | ChannelAdmin / Service-Admin | Mitglied hinzufügen (idempotent) → `{ memberIds, adminIds }` |
+| `DELETE` | `/channels/:channelId/members/:userId` | — | ChannelAdmin / Service-Admin / Self | Mitglied entfernen / verlassen → `{ memberIds, adminIds }` |
+| `POST` | `/channels/:channelId/admins` | `{ userId* }` | ChannelAdmin / Service-Admin | Zum ChannelAdmin ernennen (idempotent) → `{ memberIds, adminIds }` |
+| `DELETE` | `/channels/:channelId/admins/:userId` | — | ChannelAdmin / Service-Admin | ChannelAdmin degradieren → `{ memberIds, adminIds }` |
+
+Fehlercodes: `400` ungültige `channelId`/`userId`, `403` nicht berechtigt, `404` unbekannter Channel, `409` Ersteller kann nicht entfernt/degradiert werden. Mitgliedschaft wird im ObjectService (`channels`, `data.memberIds`/`data.adminIds`) per `X-API-Key` (PATCH `merge:true`) geschrieben; der lokale Membership-Cache wird nach jedem Write invalidiert.
+
+---
+
 ## Admin (JWT mit Rolle `admin`)
 
 | Method | Endpoint | Query | Description |
