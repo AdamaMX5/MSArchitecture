@@ -66,3 +66,30 @@ JWT-Authentifizierung, Login, Registrierung, Rollen und Permissions.
 | `POST` | `/admin/remove_permission` | `user_id`*, `key`* | Einzelnen Permission-Key entfernen |
 | `POST` | `/admin/jwt/keys` | `private_key`*, `public_key`*, `algorithm`, `persist_to_files` | JWT-Schlüsselpaar setzen |
 | `GET` | `/admin/jwt/key-storage` | — | JWT-Key-Storage-Info lesen |
+
+---
+
+## Internal (`/internal`) — `X-API-Key` erforderlich, niemals public
+
+Für Service-zu-Service-Aufrufe (z. B. TicketService beim Gast-Checkout). Kein JWT, kein Bypass über ein Admin-Token — ausschließlich der `X-API-Key`-Header zählt.
+
+**Auth:** Header `X-API-Key`, ein eigener Key pro aufrufendem Service (nie ein geteilter Master-Key). Konfiguriert über Env-Variablen mit Präfix `INTERNAL_API_KEY_<SERVICENAME>`, z. B. `INTERNAL_API_KEY_TICKET_SERVICE`. Vergleich erfolgt konstant-zeitig (`hmac.compare_digest`); bei Match wird der Servicename (aus dem Env-Var-Namen abgeleitet) als Caller-Identity zurückgegeben. Rotation/Widerruf: Env-Variable ändern + redeployen.
+
+| Method | Endpoint | Body | Response |
+|--------|----------|------|----------|
+| `GET` | `/internal/ping` | — | `{ status, caller_service }` — Reachability-Check |
+| `POST` | `/internal/users/provision` | `email`* | `{ userId, isNewUser }` |
+| `PATCH` | `/internal/users/{user_id}/email` | `newEmail`* | `{ userId, email, isEmailVerified }` |
+
+### Guest-Checkout Registrierungsprozess (Ticket-/Marktplatzkauf ohne vorherigen Account)
+
+1. **`POST /internal/users/provision`** — Aufrufer (z. B. TicketService) schickt nur die E-Mail des Käufers.
+   - E-Mail bereits registriert → bestehende `userId` wird zurückgegeben, kein Duplikat (Unique-Index auf `email` schützt race-sicher gegen zwei gleichzeitige Gast-Käufe mit derselben Adresse).
+   - E-Mail unbekannt → neuer User mit Rolle `CONSUMER`, `is_email_verify: false`, zufälligem (nie ausgegebenem) Passwort. Ein `password_reset_token` wird erzeugt und die bestehende Passwort-Setzen-Mail (`/user/reset-password`-Link) verschickt.
+   - Response enthält niemals Passwort-Hash oder Token.
+2. Der Ticketkauf selbst hängt **nicht** von `is_email_verify` ab — der aufrufende Service verschickt Ticket/QR unabhängig davon sofort per eigener Bestellbestätigung bzw. zeigt es direkt auf der Erfolgsseite.
+3. **Tippfehler-Korrektur:** Falls die Bestätigungsmail nie ankommt, kann der Käufer über einen kurzlebigen, an den Kaufvorgang gebundenen Claim-Token (den nur der aufrufende Service kennt und prüft) seine Adresse korrigieren lassen: **`PATCH /internal/users/{user_id}/email`**.
+   - Harte serverseitige Sperren, unabhängig vom Aufrufer: nur erlaubt, wenn `is_email_verify === false` **und** die Rollen des Accounts exakt `{"CONSUMER"}` sind (sonst `403`). Damit ist ausgeschlossen, dass dieser Weg zur Account-Übernahme für bereits verifizierte oder für privilegierte Accounts (z. B. ein frisch angelegter, noch unverifizierter `ADMIN`) missbraucht wird.
+   - `newEmail` bereits durch einen anderen Account belegt → `409` (inkl. Race-Schutz).
+   - Nach Änderung wird automatisch der passende Flow erneut ausgelöst: Passwort-Setzen-Mail, falls noch kein Passwort gesetzt ist, sonst die reguläre Verify-Email-Mail (wie bei `register-complete`).
+4. Sobald der Käufer über den Passwort-Setzen-Link ein echtes Passwort gesetzt hat (`/user/reset-password`), kann er sich ganz normal über `/user/check-email` → `/user/login` einloggen und seine Tickets in der App sehen. `CONSUMER` ist danach eine reguläre, weiter nutzbare Rolle (kein Einmal-Zustand).

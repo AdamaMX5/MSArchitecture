@@ -6,10 +6,13 @@ Abstraktionsschicht für alle Git-Operationen. Abstrahiert den unterliegenden Gi
 
 **Auth-Varianten:**
 - **JWT** (beliebige Rolle) — `Authorization: Bearer <token>`; für Frontend-Endpunkte
+- **JWT mit Rolle `ADMIN`** — `Authorization: Bearer <token>`; für Admin-Endpunkte (API-Key-Verwaltung)
 - **API-Key oder GITCLIENT JWT** — `X-API-Key` Header oder Bearer mit Rolle `GITCLIENT`; für CLI und Poller
 - **API-Key** — `X-API-Key` Header; für Webhook-Endpunkte
 
-**Input-Validierung auf allen Endpunkten:** `repo` matcht `/^[a-zA-Z0-9_.-]{1,100}$/`, `number` matcht `/^\d{1,9}$/`, `body` max 64 KiB. JSON-Body-Limit: 512 KiB.
+**API-Keys:** DB-gestützte, pro Client benannte Keys (MongoDB), verwaltet über die Admin-Endpunkte. Es gibt **kein** statisches Shared Secret mehr. Keys werden nach GitHub-PAT-Vorbild behandelt: Klartext nur einmal bei Erstellung sichtbar, in der DB nur der SHA-256-Hash. Format: `gts_` + 32 Byte base64url-Random. Soft-Revoke über `revokedAt`.
+
+**Input-Validierung auf allen Endpunkten:** `repo` matcht `/^[a-zA-Z0-9_.-]{1,100}$/`, `number` matcht `/^\d{1,9}$/`, `body` max 64 KiB, API-Key-`name` 1–100 Zeichen. JSON-Body-Limit: 512 KiB.
 
 ---
 
@@ -42,6 +45,20 @@ Abstraktionsschicht für alle Git-Operationen. Abstrahiert den unterliegenden Gi
 | `PATCH` | `/cli/issue/:number/close` | `repo`* | `{ number, state: "closed" }` | Issue schließen |
 
 **`type: "question"` E-Mail-Verhalten:** Kommentar wird immer gepostet. Wenn Creator-E-Mail bekannt (beim Issue-Anlegen gespeichert), wird E-Mail gesendet: Subject `[GitService #<n>] Frage zu: <title>`. Bei Fehler: `emailSent: false`, kein Fehler an Caller zurückgegeben.
+
+---
+
+## Admin (`/admin/`) — JWT mit Rolle `ADMIN`
+
+Verwaltung der DB-gestützten API-Keys. Erfordert ein gültiges JWT, dessen `roles` die Rolle `ADMIN` enthalten. `401` ohne/ungültiges Token, `403` ohne ADMIN-Rolle, `503` wenn der JWT-Public-Key noch nicht geladen ist.
+
+| Method | Endpoint | Body | Response | Description |
+|--------|----------|------|----------|-------------|
+| `POST` | `/admin/api-keys` | `name`* | `201 { id, name, key, displayPrefix, createdAt }` | Neuen API-Key erzeugen. Klartext-`key` wird **nur hier einmalig** zurückgegeben; danach nie wieder abrufbar. `createdBy` = E-Mail aus dem JWT. `400` bei ungültigem `name`. |
+| `GET` | `/admin/api-keys` | — | `200 [{ id, name, displayPrefix, createdAt, lastUsedAt, revokedAt }]` | Alle Keys auflisten — **ohne** Hash oder Klartext. |
+| `DELETE` | `/admin/api-keys/:id` | — | `200 { id, revokedAt }` | Key widerrufen (Soft-Revoke). `404` wenn unbekannt oder bereits widerrufen. |
+
+Bei DB-Fehlern antworten die Endpunkte mit `503 { error: "Database unavailable" }`.
 
 ---
 
